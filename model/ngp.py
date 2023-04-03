@@ -1,6 +1,7 @@
 from typing import Callable, List, Union
 
 import torch
+import torch.nn.functional as F
 from torch.autograd import Function
 from torch.cuda.amp import custom_bwd, custom_fwd
 
@@ -66,24 +67,46 @@ class NGPradianceField(torch.nn.Module):
         self,
         aabb: Union[torch.Tensor, List[float]],
         num_dim: int = 3,
-        density_activation: Callable = lambda x: trunc_exp(x - 1),
+        use_viewdirs: bool = True,
+        density_activation: Callable = lambda x: F.softplus(x - 1),
         unbounded: bool = False,
         geo_feat_dim: int = 31,
         n_levels: int = 16,
         log2_hashmap_size: int = 19,
         use_predict_normal: bool = True,
+        density_bias_scale: int = 10,
+        offset_scale: int = 0.5,
     ) -> None:
         super().__init__()
         if not isinstance(aabb, torch.Tensor):
             aabb = torch.tensor(aabb, dtype=torch.float32)
         self.register_buffer("aabb", aabb)
         self.num_dim = num_dim
+        self.use_viewdirs = use_viewdirs
         self.density_activation = density_activation
         self.unbounded = unbounded
         self.use_predict_normal = use_predict_normal
+        self.density_bias_scale = density_bias_scale
+        self.offset_scale = offset_scale
 
         self.geo_feat_dim = geo_feat_dim
         per_level_scale = 1.4472692012786865
+
+        if self.use_viewdirs:
+            self.direction_encoding = tcnn.Encoding(
+                n_input_dims=num_dim,
+                encoding_config={
+                    "otype": "Composite",
+                    "nested": [
+                        {
+                            "n_dims_to_encode": 3,
+                            "otype": "SphericalHarmonics",
+                            "degree": 4,
+                        },
+                        # {"otype": "Identity", "n_bins": 4, "degree": 4},
+                    ],
+                },
+            )
 
         self.mlp_encoder = tcnn.Encoding(
             n_input_dims=num_dim,
@@ -99,7 +122,7 @@ class NGPradianceField(torch.nn.Module):
         )
         self.mlp_sigma = tcnn.Network(
             n_input_dims=32,
-            n_output_dims=4,
+            n_output_dims=1,
             network_config={
                 # "otype": "FullyFusedMLP",
                 "otype": "CutlassMLP",
@@ -109,14 +132,34 @@ class NGPradianceField(torch.nn.Module):
                 "n_hidden_layers": 1,
             },
         )
-        self.mlp_normal = tcnn.Network(
-            n_input_dims=32,
+        self.mlp_rgb = tcnn.Network(
+            n_input_dims=(
+                (self.direction_encoding.n_output_dims if self.use_viewdirs else 0)
+                + 1
+                + self.geo_feat_dim
+            ),
             n_output_dims=3,
             network_config={
                 # "otype": "FullyFusedMLP",
                 "otype": "CutlassMLP",
                 "activation": "ReLU",
-                "output_activation": "None",
+                "output_activation": "Sigmoid",
+                "n_neurons": 32,
+                "n_hidden_layers": 1,
+            },
+        )
+        self.mlp_normal = tcnn.Network(
+            n_input_dims=(
+                (self.direction_encoding.n_output_dims if self.use_viewdirs else 0)
+                + 1
+                + self.geo_feat_dim
+            ),
+            n_output_dims=3,
+            network_config={
+                # "otype": "FullyFusedMLP",
+                "otype": "CutlassMLP",
+                "activation": "ReLU",
+                "output_activation": "Sigmoid",
                 "n_neurons": 32,
                 "n_hidden_layers": 1,
             },
@@ -144,23 +187,29 @@ class NGPradianceField(torch.nn.Module):
 
         h = self.mlp_sigma(x)
 
-        density_before_activation, base_mlp_out = torch.split(h, [1, 3], dim=-1)
-
         # add density bias to pre-activation as stated in Magic3D
-        density_before_activation = density_before_activation + density_bias
+        density_before_activation = h + density_bias
 
         density = (
             self.density_activation(density_before_activation) * selector[..., None]
         )
 
         if return_feat:
-            return density, base_mlp_out, x
+            return density, x
         else:
             return density
 
-    def _query_rgb(self, base_mlp_out):
-        rgb = torch.sigmoid(base_mlp_out)
-        return rgb
+    def _compute_embedding(self, dir, embedding):
+        # tcnn requires directions in the range [0, 1]
+        if self.use_viewdirs:
+            dir = (dir + 1.0) / 2.0
+            d = self.direction_encoding(dir.view(-1, dir.shape[-1]))
+            return torch.cat([d, embedding.view(-1, 1 + self.geo_feat_dim)], dim=-1)
+        else:
+            return embedding.view(-1, 1 + self.geo_feat_dim)
+
+    def _query_rgb(self, embedding):
+        return self.mlp_rgb(embedding)
 
     def _query_normal(self, embedding):
         return self.mlp_normal(embedding)
@@ -207,19 +256,36 @@ class NGPradianceField(torch.nn.Module):
         self,
         positions: torch.Tensor,
         directions: torch.Tensor = None,
+        shading: str = "albedo",
+        light_direction: torch.Tensor = None,
+        ambient_ratio: int = 0.1,
     ):
-        if self.use_viewdirs and (directions is not None):
-            assert (
-                positions.shape == directions.shape
-            ), f"{positions.shape} v.s. {directions.shape}"
+        density, embedding = self.query_density(positions, return_feat=True)
+        embedding = self._compute_embedding(directions, embedding)
+        rgb = self._query_rgb(embedding)
 
-            density, base_mlp_out, embedding = self.query_density(
-                positions, return_rgb=True, return_feat=True
-            )
-            rgb = self._query_rgb(base_mlp_out)
+        if shading == "albedo":
+            normal = None
+        else:
             if self.use_predict_normal:
                 normal = self._query_normal(embedding)
             else:
                 normal = self._finite_difference_normals_approximator(positions)
+            safe_normalize = lambda x: x / torch.sqrt(
+                torch.clamp(torch.sum(x * x, -1, keepdim=True), min=1e-20)
+            )
+            normal = safe_normalize(normal).nan_to_num_()
+            light_direction = light_direction.to(normal.dtype)
+
+            lambertian = ambient_ratio + (1 - ambient_ratio) * (
+                normal @ light_direction / (light_direction**2).sum() ** (1 / 2)
+            ).clamp(min=0).unsqueeze(-1)
+
+            if shading == "textureless":
+                rgb = lambertian.repeat(1, 3)
+            elif shading == "lambertian":
+                rgb = rgb * lambertian
+            else:
+                NotImplementedError()
 
         return rgb, density, normal

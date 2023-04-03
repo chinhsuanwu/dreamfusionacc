@@ -29,6 +29,7 @@ class DreamFusionLoader(Dataset):
         height: int = None,
         near: float = None,
         far: float = None,
+        shading_sample_prob: list = [1, 0, 0],
         device=None,
     ):
         super().__init__()
@@ -40,6 +41,7 @@ class DreamFusionLoader(Dataset):
         self.near = self.NEAR if near is None else near
         self.far = self.FAR if far is None else far
         self.num_rays = self.width * self.height
+        self.shading_sample_prob = shading_sample_prob
         self.device = device
 
         self.focal = 0.7 * self.width
@@ -127,15 +129,7 @@ class DreamFusionLoader(Dataset):
             elif self.color_bkgd_aug == "black":
                 color_bkgd = torch.zeros(3, device=self.device)
             shading = np.random.choice(
-                ["albedo", "textureless", "lambertian"],
-                1,
-                # p=[1.0, 0.0, 0.0]
-                # p=[0.8, 0, 0.2],
-                # p=[0.5, 0, 0.5],
-                # p=[0.34, 0.33, 0.33],
-                # p=[0.8, 0.1, 0.1],
-                p=[0.2, 0.4, 0.4],
-                # p=[0.125, 0.125, 0.75],
+                ["albedo", "textureless", "lambertian"], 1, p=self.shading_sample_prob
             ).item()
         else:
             # just use white during inference

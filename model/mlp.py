@@ -1,7 +1,3 @@
-"""
-Copyright (c) 2022 Ruilong Li, UC Berkeley.
-"""
-
 import functools
 import math
 from typing import Callable, Optional
@@ -215,6 +211,44 @@ class VanillaNeRFRadianceField(nn.Module):
             net_width_condition=net_width_condition,
         )
 
+    def _finite_difference_normals_approximator(self, positions, bound=2, epsilon=1e-2):
+        # finite difference
+        # f(x+h, y, z), f(x, y+h, z), f(x, y, z+h) - f(x-h, y, z), f(x, y-h, z), f(x, y, z-h)
+        pos_x = positions + torch.tensor(
+            [[epsilon, 0.00, 0.00]], device=positions.device
+        )
+        dist_dx_pos = self.query_density(pos_x.clamp(-bound, bound), bound)[0]
+        pos_y = positions + torch.tensor(
+            [[0.00, epsilon, 0.00]], device=positions.device
+        )
+        dist_dy_pos = self.query_density(pos_y.clamp(-bound, bound), bound)[0]
+        pos_z = positions + torch.tensor(
+            [[0.00, 0.00, epsilon]], device=positions.device
+        )
+        dist_dz_pos = self.query_density(pos_z.clamp(-bound, bound), bound)[0]
+
+        neg_x = positions + torch.tensor(
+            [[-epsilon, 0.00, 0.00]], device=positions.device
+        )
+        dist_dx_neg = self.query_density(neg_x.clamp(-bound, bound), bound)[0]
+        neg_y = positions + torch.tensor(
+            [[0.00, -epsilon, 0.00]], device=positions.device
+        )
+        dist_dy_neg = self.query_density(neg_y.clamp(-bound, bound), bound)[0]
+        neg_z = positions + torch.tensor(
+            [[0.00, 0.00, -epsilon]], device=positions.device
+        )
+        dist_dz_neg = self.query_density(neg_z.clamp(-bound, bound), bound)[0]
+
+        return torch.cat(
+            [
+                0.5 * (dist_dx_pos - dist_dx_neg) / epsilon,
+                0.5 * (dist_dy_pos - dist_dy_neg) / epsilon,
+                0.5 * (dist_dz_pos - dist_dz_neg) / epsilon,
+            ],
+            dim=-1,
+        )
+
     def query_opacity(self, x, step_size):
         density = self.query_density(x)
         # if the density is small enough those two are the same.
@@ -222,51 +256,56 @@ class VanillaNeRFRadianceField(nn.Module):
         opacity = density * step_size
         return opacity
 
+    def density_bias(self, x, density_bias_scale: int = 5, offset_scale: int = 0.2):
+        tau = density_bias_scale * torch.exp(
+            -((torch.abs(x).sum(-1)) ** 2) / (2 * offset_scale**2)
+        )
+        return tau[:, None]
+
     def query_density(self, x):
+        density_bias = self.density_bias(x)
+
         x = self.posi_encoder(x)
         sigma = self.mlp.query_density(x)
-        return F.relu(sigma)
+        sigma = F.relu(sigma) + density_bias
+        return sigma
 
-    def forward(self, x, condition=None):
-        x = self.posi_encoder(x)
+    def forward(
+        self,
+        positions: torch.Tensor,
+        condition=None,
+        shading: str = "albedo",
+        light_direction: torch.Tensor = None,
+        ambient_ratio: int = 0.1,
+    ):
+        density_bias = self.density_bias(positions)
+
+        x = self.posi_encoder(positions)
         if condition is not None:
             condition = self.view_encoder(condition)
         rgb, sigma = self.mlp(x, condition=condition)
-        return torch.sigmoid(rgb), F.relu(sigma)
 
+        rgb = torch.sigmoid(rgb)
+        sigma = F.relu(sigma) + density_bias
 
-class DNeRFRadianceField(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.posi_encoder = SinusoidalEncoder(3, 0, 4, True)
-        self.time_encoder = SinusoidalEncoder(1, 0, 4, True)
-        self.warp = MLP(
-            input_dim=self.posi_encoder.latent_dim + self.time_encoder.latent_dim,
-            output_dim=3,
-            net_depth=4,
-            net_width=64,
-            skip_layer=2,
-            output_init=functools.partial(torch.nn.init.uniform_, b=1e-4),
-        )
-        self.nerf = VanillaNeRFRadianceField()
+        if shading == "albedo":
+            normal = None
+        else:
+            normal = self._finite_difference_normals_approximator(positions)
+            safe_normalize = lambda x: x / torch.sqrt(
+                torch.clamp(torch.sum(x * x, -1, keepdim=True), min=1e-20)
+            )
+            normal = safe_normalize(normal).nan_to_num_()
 
-    def query_opacity(self, x, timestamps, step_size):
-        idxs = torch.randint(0, len(timestamps), (x.shape[0],), device=x.device)
-        t = timestamps[idxs]
-        density = self.query_density(x, t)
-        # if the density is small enough those two are the same.
-        # opacity = 1.0 - torch.exp(-density * step_size)
-        opacity = density * step_size
-        return opacity
+            lambertian = ambient_ratio + (1 - ambient_ratio) * (
+                normal @ light_direction / (light_direction**2).sum() ** (1 / 2)
+            ).clamp(min=0).unsqueeze(-1)
 
-    def query_density(self, x, t):
-        x = x + self.warp(
-            torch.cat([self.posi_encoder(x), self.time_encoder(t)], dim=-1)
-        )
-        return self.nerf.query_density(x)
+            if shading == "textureless":
+                rgb = lambertian.repeat(1, 3)
+            elif shading == "lambertian":
+                rgb = rgb * lambertian
+            else:
+                NotImplementedError()
 
-    def forward(self, x, t, condition=None):
-        x = x + self.warp(
-            torch.cat([self.posi_encoder(x), self.time_encoder(t)], dim=-1)
-        )
-        return self.nerf(x, condition=condition)
+        return rgb, sigma, normal

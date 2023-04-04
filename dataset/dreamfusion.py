@@ -17,7 +17,7 @@ class DreamFusionLoader(Dataset):
     """
 
     WIDTH, HEIGHT = 128, 128
-    NEAR, FAR = 0.01, None
+    NEAR, FAR = None, None
     OPENGL_CAMERA = True
 
     def __init__(

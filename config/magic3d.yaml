@@ -31,7 +31,7 @@ offset_scale: 0.5
 
 # scene parameters
 aabb: "-1.0,-1.0,-1.0,1.0,1.0,1.0"
-near_plane: 0.05
+near_plane: 0.1
 far_plane: null
 
 # render parameters
@@ -40,13 +40,13 @@ cone_angle: 0.0
 alpha_thre: 0.0
 
 # regularization
-use_shading: False
+use_shading: True
 start_shading_step: 1000
 shading_sample_prob: "0.125,0.125,0.75"   # "albedo", "textureless", "lambertian"
 
 use_orient_loss: False
 lambda_orient: 1.0e-2
-use_opacity_loss: False
+use_opacity_loss: True
 lambda_opacity: 1.0e-3
 use_entropy_loss: False
 lambda_entropy: 1.0e-4

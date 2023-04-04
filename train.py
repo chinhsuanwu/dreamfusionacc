@@ -230,7 +230,7 @@ if __name__ == "__main__":
                         cone_angle=config.cone_angle,
                         alpha_thre=config.alpha_thre,
                         shading=shading,
-                        use_predict_bkgd=config.use_predict_bkgd,
+                        use_predict_bkgd=False,
                         # test options
                         eval_chunk_size=config.eval_chunk_size,
                     )

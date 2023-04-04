@@ -8,8 +8,6 @@ from dataset.utils import Rays, namedtuple_map, rand_poses
 from nerfacc import OccupancyGrid, ray_marching
 from nerfacc.vol_rendering import *
 
-import pdb
-
 
 def set_random_seed(seed):
     random.seed(seed)
@@ -28,7 +26,7 @@ def custom_rendering(
     # rendering options
     render_bkgd: Optional[torch.Tensor] = None,
     shading: str = "albedo",
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Please refer to nerfacc.vol_rendering.rendering()"""
 
     if rgb_sigma_normal_fn is None:
@@ -36,6 +34,7 @@ def custom_rendering(
 
     # Query sigma/alpha and color with gradients
     rgbs, sigmas, normals = rgb_sigma_normal_fn(t_starts, t_ends, ray_indices, shading)
+
     assert rgbs.shape[-1] == 3, "rgbs must have 3 channels, got {}".format(rgbs.shape)
     assert (
         sigmas.shape == t_starts.shape
@@ -82,7 +81,9 @@ def render_image(
     render_bkgd: Optional[torch.Tensor] = None,
     cone_angle: float = 0.0,
     alpha_thre: float = 0.0,
+    eval_chunk_size: int = 8192,
     shading: str = "albedo",
+    use_predict_bkgd: bool = False,
 ):
     """Render the pixels of an image."""
     rays_shape = rays.origins.shape
@@ -119,8 +120,8 @@ def render_image(
         return radiance_field(positions, t_dirs, shading, light_direction)
 
     results = []
-    # chunk = len(rays)  # torch.iinfo(torch.int32).max
-    chunk = torch.iinfo(torch.int32).max
+
+    chunk = torch.iinfo(torch.int32).max if radiance_field.training else eval_chunk_size
 
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
@@ -138,6 +139,9 @@ def render_image(
             cone_angle=cone_angle,
             alpha_thre=alpha_thre,
         )
+
+        if use_predict_bkgd:
+            render_bkgd = radiance_field.query_bkgd(chunk_rays.viewdirs)
 
         # use customized rendering function to render normal
         rgb, opacity, depth, normal, weight = custom_rendering(

@@ -59,16 +59,17 @@ if __name__ == "__main__":
     elif config.backbone == "ngp":
         from model.ngp import NGPradianceField
 
-        grad_scaler = torch.cuda.amp.GradScaler()
+        grad_scaler = torch.cuda.amp.GradScaler(2**10)
         radiance_field = NGPradianceField(
             aabb=scene_aabb,
             density_activation=lambda x: F.softplus(x - 1),
             use_predict_normal=config.use_predict_normal,
             density_bias_scale=config.density_bias_scale,
             offset_scale=config.offset_scale,
+            use_predict_bkgd=config.use_predict_bkgd,
         ).to(config.device)
         optimizer = torch.optim.Adam(
-            radiance_field.parameters(), lr=config.lr, betas=(0.9, 0.99), eps=1e-15
+            radiance_field.get_params(lr=config.lr), lr=config.lr, betas=(0.9, 0.99), eps=1e-15
         )
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 1)
@@ -91,7 +92,6 @@ if __name__ == "__main__":
     os.makedirs(f"{log_dir}/rgb")
     os.makedirs(f"{log_dir}/acc")
     os.makedirs(f"{log_dir}/depth")
-    # os.makedirs(f"{log_dir}/normal")
 
     train_dataset = DreamFusionLoader(
         size=config.train_dataset_size,
@@ -161,6 +161,7 @@ if __name__ == "__main__":
             cone_angle=config.cone_angle,
             alpha_thre=config.alpha_thre,
             shading=shading,
+            use_predict_bkgd=config.use_predict_bkgd,
         )
         if n_rendering_samples == 0:
             continue
@@ -229,6 +230,9 @@ if __name__ == "__main__":
                         cone_angle=config.cone_angle,
                         alpha_thre=config.alpha_thre,
                         shading=shading,
+                        use_predict_bkgd=config.use_predict_bkgd,
+                        # test options
+                        eval_chunk_size=config.eval_chunk_size,
                     )
 
                     if len(rgb.shape) == 2:

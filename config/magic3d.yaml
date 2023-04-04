@@ -10,13 +10,14 @@ lr: 1.0e-2
 weight_decay: 0.0
 max_steps: 10000
 log_interval: 100
-eval_interval: 100
+eval_interval: 1000
 train_dataset_size: 100
 train_h: 256
 train_w: 256
 eval_dataset_size: 5
 eval_h: 256
 eval_w: 256
+eval_chunk_size: 65536
 
 # radiance field
 backbone: 'ngp'
@@ -24,16 +25,17 @@ grid_resolution: 128
 grid_update_interval: 10
 grid_update_ema_decay: 0.6
 use_predict_normal: True
+use_predict_bkgd: True
 density_bias_scale: 10
 offset_scale: 0.5
 
 # scene parameters
-aabb: "-2.0,-2.0,-2.0,2.0,2.0,2.0"
-near_plane: 0.1
-far_plane: 2.0
+aabb: "-1.0,-1.0,-1.0,1.0,1.0,1.0"
+near_plane: 0.05
+far_plane: null
 
 # render parameters
-n_samples: 256  # 1024 in the paper setting
+n_samples: 512  # 1024 in the paper setting
 cone_angle: 0.0
 alpha_thre: 0.0
 

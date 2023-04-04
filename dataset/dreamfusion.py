@@ -17,14 +17,14 @@ class DreamFusionLoader(Dataset):
     """
 
     WIDTH, HEIGHT = 128, 128
-    NEAR, FAR = 0.1, None
+    NEAR, FAR = 0.01, None
     OPENGL_CAMERA = True
 
     def __init__(
         self,
         size: int = 100,
         training: int = True,
-        color_bkgd_aug: str = "random",
+        color_bkgd_aug: str = "white",
         width: int = None,
         height: int = None,
         near: float = None,
@@ -105,9 +105,7 @@ class DreamFusionLoader(Dataset):
             pose, direction = rand_poses(1, device=self.device, return_dirs=True)
         else:
             phi = (index / self.size) * 360
-            pose, direction = circle_poses(
-                phi=phi, device=self.device, return_dirs=True
-            )
+            pose, direction = circle_poses(radius=1.2, phi=phi, device=self.device, return_dirs=True)
 
         c2w = pose[0, :3, :].expand(self.num_rays, 3, 4)  # (num_rays, 3, 4)
         rays = self.compute_rays(c2w)

@@ -75,7 +75,8 @@ class NGPradianceField(torch.nn.Module):
         log2_hashmap_size: int = 19,
         use_predict_normal: bool = True,
         density_bias_scale: int = 10,
-        offset_scale: int = 0.5,
+        offset_scale: float = 0.5,
+        use_predict_bkgd: bool = True,
     ) -> None:
         super().__init__()
         if not isinstance(aabb, torch.Tensor):
@@ -88,6 +89,7 @@ class NGPradianceField(torch.nn.Module):
         self.use_predict_normal = use_predict_normal
         self.density_bias_scale = density_bias_scale
         self.offset_scale = offset_scale
+        self.use_predict_bkgd = use_predict_bkgd
 
         self.geo_feat_dim = geo_feat_dim
         per_level_scale = 1.4472692012786865
@@ -124,8 +126,8 @@ class NGPradianceField(torch.nn.Module):
             n_input_dims=32,
             n_output_dims=1,
             network_config={
-                # "otype": "FullyFusedMLP",
-                "otype": "CutlassMLP",
+                "otype": "FullyFusedMLP",
+                # "otype": "CutlassMLP",
                 "activation": "ReLU",
                 "output_activation": "None",
                 "n_neurons": 32,
@@ -140,30 +142,47 @@ class NGPradianceField(torch.nn.Module):
             ),
             n_output_dims=3,
             network_config={
-                # "otype": "FullyFusedMLP",
-                "otype": "CutlassMLP",
+                "otype": "FullyFusedMLP",
+                # "otype": "CutlassMLP",
                 "activation": "ReLU",
                 "output_activation": "Sigmoid",
                 "n_neurons": 32,
                 "n_hidden_layers": 1,
             },
         )
-        self.mlp_normal = tcnn.Network(
-            n_input_dims=(
-                (self.direction_encoding.n_output_dims if self.use_viewdirs else 0)
-                + 1
-                + self.geo_feat_dim
-            ),
-            n_output_dims=3,
-            network_config={
-                # "otype": "FullyFusedMLP",
-                "otype": "CutlassMLP",
-                "activation": "ReLU",
-                "output_activation": "Sigmoid",
-                "n_neurons": 32,
-                "n_hidden_layers": 1,
-            },
-        )
+
+        if self.use_predict_normal:
+            self.mlp_normal = tcnn.Network(
+                n_input_dims=(
+                    (self.direction_encoding.n_output_dims if self.use_viewdirs else 0)
+                    + 1
+                    + self.geo_feat_dim
+                ),
+                n_output_dims=3,
+                network_config={
+                    "otype": "FullyFusedMLP",
+                    # "otype": "CutlassMLP",
+                    "activation": "ReLU",
+                    "output_activation": "Sigmoid",
+                    "n_neurons": 32,
+                    "n_hidden_layers": 1,
+                },
+            )
+
+        if self.use_predict_bkgd:
+            assert self.use_viewdirs is True
+            self.mlp_bkgd = tcnn.Network(
+                n_input_dims=self.direction_encoding.n_output_dims,
+                n_output_dims=3,
+                network_config={
+                    "otype": "FullyFusedMLP",
+                    # "otype": "CutlassMLP",
+                    "activation": "ReLU",
+                    "output_activation": "Sigmoid",
+                    "n_neurons": 16,
+                    "n_hidden_layers": 1,
+                },
+            )
 
     def density_bias(self, x, density_bias_scale: int = 10, offset_scale: int = 0.5):
         tau = density_bias_scale * (1 - torch.sqrt((x**2).sum(-1)) / offset_scale)
@@ -213,6 +232,11 @@ class NGPradianceField(torch.nn.Module):
 
     def _query_normal(self, embedding):
         return self.mlp_normal(embedding)
+
+    def query_bkgd(self, dir):
+        dir = (dir + 1.0) / 2.0
+        d = self.direction_encoding(dir.view(-1, dir.shape[-1]))
+        return self.mlp_bkgd(d)
 
     def _finite_difference_normals_approximator(self, positions, bound=2, epsilon=1e-2):
         # finite difference
@@ -274,8 +298,8 @@ class NGPradianceField(torch.nn.Module):
             safe_normalize = lambda x: x / torch.sqrt(
                 torch.clamp(torch.sum(x * x, -1, keepdim=True), min=1e-20)
             )
-            normal = safe_normalize(normal).nan_to_num_()
-            light_direction = light_direction.to(normal.dtype)
+            normal = safe_normalize(normal).nan_to_num_().to(rgb.dtype)
+            light_direction = light_direction.to(rgb.dtype)
 
             lambertian = ambient_ratio + (1 - ambient_ratio) * (
                 normal @ light_direction / (light_direction**2).sum() ** (1 / 2)
@@ -289,3 +313,16 @@ class NGPradianceField(torch.nn.Module):
                 NotImplementedError()
 
         return rgb, density, normal
+
+    def get_params(self, lr):
+        params = [
+            {'params': self.mlp_encoder.parameters(), 'lr': lr},
+            {'params': self.mlp_sigma.parameters(), 'lr': lr},
+            {'params': self.mlp_rgb.parameters(), 'lr': lr},
+        ]
+        if self.use_predict_normal:
+            params.append({'params': self.mlp_normal.parameters(), 'lr': lr},)
+        if self.use_predict_bkgd:
+            params.append({'params': self.mlp_bkgd.parameters(), 'lr': lr / 10},)
+
+        return params

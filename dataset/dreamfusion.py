@@ -17,7 +17,7 @@ class DreamFusionLoader(Dataset):
     """
 
     WIDTH, HEIGHT = 128, 128
-    NEAR, FAR = None, None
+    NEAR, FAR = 0.1, 1.0e10
     OPENGL_CAMERA = True
 
     def __init__(
@@ -66,9 +66,7 @@ class DreamFusionLoader(Dataset):
 
     @torch.no_grad()
     def __getitem__(self, index):
-        return {
-            "novel": self.fetch_novel_view(None if self.training else index),
-        }
+        return self.fetch_novel_view(None if self.training else index)
 
     def compute_rays(self, c2w):
         # generate rays
@@ -105,7 +103,9 @@ class DreamFusionLoader(Dataset):
             pose, direction = rand_poses(1, device=self.device, return_dirs=True)
         else:
             phi = (index / self.size) * 360
-            pose, direction = circle_poses(radius=1.2, phi=phi, device=self.device, return_dirs=True)
+            pose, direction = circle_poses(
+                radius=1.5, phi=phi, device=self.device, return_dirs=True
+            )
 
         c2w = pose[0, :3, :].expand(self.num_rays, 3, 4)  # (num_rays, 3, 4)
         rays = self.compute_rays(c2w)
@@ -130,7 +130,7 @@ class DreamFusionLoader(Dataset):
                 ["albedo", "textureless", "lambertian"], 1, p=self.shading_sample_prob
             ).item()
         else:
-            # just use white during inference
+            # only use white during inference
             color_bkgd = torch.ones(3, device=self.device)
             shading = "albedo"
 

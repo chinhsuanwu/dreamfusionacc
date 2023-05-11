@@ -1,5 +1,6 @@
 from typing import Callable, List, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.autograd import Function
@@ -60,6 +61,10 @@ def contract_to_unisphere(
         return x
 
 
+def safe_normalize(x: torch.Tensor):
+    return x / torch.sqrt(torch.clamp(torch.sum(x * x, -1, keepdim=True), min=1e-20))
+
+
 class NGPradianceField(torch.nn.Module):
     """Instance-NGP radiance Field"""
 
@@ -70,13 +75,15 @@ class NGPradianceField(torch.nn.Module):
         use_viewdirs: bool = True,
         density_activation: Callable = lambda x: F.softplus(x - 1),
         unbounded: bool = False,
+        base_resolution: int = 16,
+        max_resolution: int = 4096,
         geo_feat_dim: int = 31,
         n_levels: int = 16,
         log2_hashmap_size: int = 19,
-        use_predict_normal: bool = True,
+        use_normal_net: bool = True,
         density_bias_scale: int = 10,
         offset_scale: float = 0.5,
-        use_predict_bkgd: bool = True,
+        use_bkgd_net: bool = True,
     ) -> None:
         super().__init__()
         if not isinstance(aabb, torch.Tensor):
@@ -86,13 +93,15 @@ class NGPradianceField(torch.nn.Module):
         self.use_viewdirs = use_viewdirs
         self.density_activation = density_activation
         self.unbounded = unbounded
-        self.use_predict_normal = use_predict_normal
+        self.use_normal_net = use_normal_net
         self.density_bias_scale = density_bias_scale
         self.offset_scale = offset_scale
-        self.use_predict_bkgd = use_predict_bkgd
+        self.use_bkgd_net = use_bkgd_net
 
         self.geo_feat_dim = geo_feat_dim
-        per_level_scale = 1.4472692012786865
+        per_level_scale = np.exp(
+            (np.log(max_resolution) - np.log(base_resolution)) / (n_levels - 1)
+        ).tolist()
 
         if self.use_viewdirs:
             self.direction_encoding = tcnn.Encoding(
@@ -105,8 +114,8 @@ class NGPradianceField(torch.nn.Module):
                             "otype": "SphericalHarmonics",
                             "degree": 4,
                         },
-                        # {"otype": "Identity", "n_bins": 4, "degree": 4},
                     ],
+                    # {"otype": "Identity", "n_bins": 4, "degree": 4},
                 },
             )
 
@@ -117,17 +126,17 @@ class NGPradianceField(torch.nn.Module):
                 "n_levels": n_levels,
                 "n_features_per_level": 2,
                 "log2_hashmap_size": log2_hashmap_size,
-                "base_resolution": 16,
+                "base_resolution": base_resolution,
                 "per_level_scale": per_level_scale,
                 "interpolation": "Smoothstep",
             },
+            dtype=torch.float32,    # float16 will cause NaN issue
         )
         self.mlp_sigma = tcnn.Network(
-            n_input_dims=32,
+            n_input_dims=1 + self.geo_feat_dim,
             n_output_dims=1,
             network_config={
                 "otype": "FullyFusedMLP",
-                # "otype": "CutlassMLP",
                 "activation": "ReLU",
                 "output_activation": "None",
                 "n_neurons": 32,
@@ -143,7 +152,6 @@ class NGPradianceField(torch.nn.Module):
             n_output_dims=3,
             network_config={
                 "otype": "FullyFusedMLP",
-                # "otype": "CutlassMLP",
                 "activation": "ReLU",
                 "output_activation": "Sigmoid",
                 "n_neurons": 32,
@@ -151,7 +159,7 @@ class NGPradianceField(torch.nn.Module):
             },
         )
 
-        if self.use_predict_normal:
+        if self.use_normal_net:
             self.mlp_normal = tcnn.Network(
                 n_input_dims=(
                     (self.direction_encoding.n_output_dims if self.use_viewdirs else 0)
@@ -161,7 +169,6 @@ class NGPradianceField(torch.nn.Module):
                 n_output_dims=3,
                 network_config={
                     "otype": "FullyFusedMLP",
-                    # "otype": "CutlassMLP",
                     "activation": "ReLU",
                     "output_activation": "Sigmoid",
                     "n_neurons": 32,
@@ -169,14 +176,13 @@ class NGPradianceField(torch.nn.Module):
                 },
             )
 
-        if self.use_predict_bkgd:
+        if self.use_bkgd_net:
             assert self.use_viewdirs is True
             self.mlp_bkgd = tcnn.Network(
                 n_input_dims=self.direction_encoding.n_output_dims,
                 n_output_dims=3,
                 network_config={
                     "otype": "FullyFusedMLP",
-                    # "otype": "CutlassMLP",
                     "activation": "ReLU",
                     "output_activation": "Sigmoid",
                     "n_neurons": 16,
@@ -204,17 +210,15 @@ class NGPradianceField(torch.nn.Module):
             .to(x)
         )
 
-        h = self.mlp_sigma(x)
-
-        # add density bias to pre-activation as stated in Magic3D
-        density_before_activation = h + density_bias
+        # add density bias to pre-activation
+        density_before_activation = self.mlp_sigma(x) + density_bias
 
         density = (
             self.density_activation(density_before_activation) * selector[..., None]
         )
 
         if return_feat:
-            return density, x
+            return density, x, density_before_activation
         else:
             return density
 
@@ -238,77 +242,51 @@ class NGPradianceField(torch.nn.Module):
         d = self.direction_encoding(dir.view(-1, dir.shape[-1]))
         return self.mlp_bkgd(d)
 
-    def _finite_difference_normals_approximator(self, positions, bound=2, epsilon=1e-2):
-        # finite difference
-        # f(x+h, y, z), f(x, y+h, z), f(x, y, z+h) - f(x-h, y, z), f(x, y-h, z), f(x, y, z-h)
-        pos_x = positions + torch.tensor(
-            [[epsilon, 0.00, 0.00]], device=positions.device
-        )
-        dist_dx_pos = self.query_density(pos_x.clamp(-bound, bound), bound)[0]
-        pos_y = positions + torch.tensor(
-            [[0.00, epsilon, 0.00]], device=positions.device
-        )
-        dist_dy_pos = self.query_density(pos_y.clamp(-bound, bound), bound)[0]
-        pos_z = positions + torch.tensor(
-            [[0.00, 0.00, epsilon]], device=positions.device
-        )
-        dist_dz_pos = self.query_density(pos_z.clamp(-bound, bound), bound)[0]
-
-        neg_x = positions + torch.tensor(
-            [[-epsilon, 0.00, 0.00]], device=positions.device
-        )
-        dist_dx_neg = self.query_density(neg_x.clamp(-bound, bound), bound)[0]
-        neg_y = positions + torch.tensor(
-            [[0.00, -epsilon, 0.00]], device=positions.device
-        )
-        dist_dy_neg = self.query_density(neg_y.clamp(-bound, bound), bound)[0]
-        neg_z = positions + torch.tensor(
-            [[0.00, 0.00, -epsilon]], device=positions.device
-        )
-        dist_dz_neg = self.query_density(neg_z.clamp(-bound, bound), bound)[0]
-
-        return torch.cat(
-            [
-                0.5 * (dist_dx_pos - dist_dx_neg) / epsilon,
-                0.5 * (dist_dy_pos - dist_dy_neg) / epsilon,
-                0.5 * (dist_dz_pos - dist_dz_neg) / epsilon,
-            ],
-            dim=-1,
-        )
-
     def forward(
         self,
         positions: torch.Tensor,
         directions: torch.Tensor = None,
         shading: str = "albedo",
         light_direction: torch.Tensor = None,
-        ambient_ratio: int = 0.1,
     ):
-        density, embedding = self.query_density(positions, return_feat=True)
-        embedding = self._compute_embedding(directions, embedding)
-        rgb = self._query_rgb(embedding)
-
         if shading == "albedo":
+            density, embedding, _ = self.query_density(positions, return_feat=True)
+            embedding = self._compute_embedding(directions, embedding)
+            rgb = self._query_rgb(embedding)
             normal = None
         else:
-            if self.use_predict_normal:
-                normal = self._query_normal(embedding)
-            else:
-                normal = self._finite_difference_normals_approximator(positions)
-            safe_normalize = lambda x: x / torch.sqrt(
-                torch.clamp(torch.sum(x * x, -1, keepdim=True), min=1e-20)
-            )
-            normal = safe_normalize(normal).nan_to_num_().to(rgb.dtype)
-            light_direction = light_direction.to(rgb.dtype)
+            with torch.enable_grad():
+                positions.requires_grad_(True)
 
+                density, embedding, density_before_activation = self.query_density(
+                    positions, return_feat=True
+                )
+                embedding = self._compute_embedding(directions, embedding)
+                rgb = self._query_rgb(embedding)
+
+                if self.use_normal_net:
+                    normal = self._query_normal(embedding)
+                else:
+                    #  https://github.com/nerfstudio-project/nerfstudio/blob/main/nerfstudio/fields/base_field.py#L87
+                    normal = -torch.autograd.grad(
+                        density_before_activation,
+                        positions,
+                        grad_outputs=torch.ones_like(density_before_activation),
+                        retain_graph=True,
+                    )[0]
+                    normal = safe_normalize(normal).nan_to_num()
+
+            ambient_ratio = 0.1 + 0.9 * np.random.rand()
             lambertian = ambient_ratio + (1 - ambient_ratio) * (
                 normal @ light_direction / (light_direction**2).sum() ** (1 / 2)
             ).clamp(min=0).unsqueeze(-1)
 
             if shading == "textureless":
-                rgb = lambertian.repeat(1, 3)
+                rgb = lambertian.tile(1, 3)
             elif shading == "lambertian":
                 rgb = rgb * lambertian
+            elif shading == "normal":
+                rgb = (normal + 1) / 2
             else:
                 NotImplementedError()
 
@@ -316,13 +294,23 @@ class NGPradianceField(torch.nn.Module):
 
     def get_params(self, lr):
         params = [
-            {'params': self.mlp_encoder.parameters(), 'lr': lr},
-            {'params': self.mlp_sigma.parameters(), 'lr': lr},
-            {'params': self.mlp_rgb.parameters(), 'lr': lr},
+            {"params": self.mlp_encoder.parameters(), "lr": lr},
+            {"params": self.mlp_sigma.parameters(), "lr": lr},
+            {"params": self.mlp_rgb.parameters(), "lr": lr},
         ]
-        if self.use_predict_normal:
-            params.append({'params': self.mlp_normal.parameters(), 'lr': lr},)
-        if self.use_predict_bkgd:
-            params.append({'params': self.mlp_bkgd.parameters(), 'lr': lr / 10},)
+
+        if self.use_viewdirs:
+            params.append(
+                {"params": self.direction_encoding.parameters(), "lr": lr},
+            )
+        if self.use_normal_net:
+            params.append(
+                {"params": self.mlp_normal.parameters(), "lr": lr},
+            )
+        if self.use_bkgd_net:
+            # background net has lower learning rate
+            params.append(
+                {"params": self.mlp_bkgd.parameters(), "lr": lr / 10},
+            )
 
         return params

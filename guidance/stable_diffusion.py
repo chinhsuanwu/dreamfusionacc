@@ -1,15 +1,18 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
-from diffusers.utils.import_utils import is_xformers_available
-from einops import rearrange
-from torch.cuda.amp import custom_bwd, custom_fwd
-from transformers import CLIPTextModel, CLIPTokenizer, logging
+"""
+Original code: https://github.com/ashawkey/stable-dreamfusion
+"""
 
+from diffusers import DDIMScheduler, StableDiffusionPipeline
+from transformers import logging
 
 # suppress partial model loading warning
 logging.set_verbosity_error()
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange
+from torch.cuda.amp import custom_bwd, custom_fwd
 
 
 class SpecifyGradient(torch.autograd.Function):
@@ -24,12 +27,28 @@ class SpecifyGradient(torch.autograd.Function):
     @custom_bwd
     def backward(ctx, grad_scale):
         (gt_grad,) = ctx.saved_tensors
-        return gt_grad * grad_scale, None
+        gt_grad = gt_grad * grad_scale
+        return gt_grad, None
+
+
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 class StableDiffusion(nn.Module):
-    def __init__(self, sd_version="2.1", concept_name=None, hf_key=None):
+    def __init__(
+        self,
+        device,
+        fp16=True,
+        vram_O=False,
+        sd_version="2.1",
+        hf_key=None,
+        t_range=[0.02, 0.98],
+    ):
         super().__init__()
+
+        self.device = device
         self.sd_version = sd_version
 
         print(f"[INFO] loading stable diffusion...")
@@ -43,56 +62,55 @@ class StableDiffusion(nn.Module):
             model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == "1.5":
             model_key = "runwayml/stable-diffusion-v1-5"
-        elif self.sd_version == "1.4":
-            model_key = "CompVis/stable-diffusion-v1-4"
         else:
             raise ValueError(
                 f"Stable-diffusion version {self.sd_version} not supported."
             )
 
+        self.precision_t = torch.float16 if fp16 else torch.float32
+
         # Create model
-        self.vae = AutoencoderKL.from_pretrained(model_key, subfolder="vae")
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_key, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(
-            model_key, subfolder="text_encoder"
+        pipe = StableDiffusionPipeline.from_pretrained(
+            model_key, torch_dtype=self.precision_t
         )
-        self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet")
 
-        if is_xformers_available():
-            self.unet.enable_xformers_memory_efficient_attention()
+        if vram_O:
+            pipe.enable_sequential_cpu_offload()
+            pipe.enable_vae_slicing()
+            pipe.unet.to(memory_format=torch.channels_last)
+            pipe.enable_attention_slicing(1)
+        else:
+            pipe.to(device)
 
-        self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        self.vae = pipe.vae
+        self.tokenizer = pipe.tokenizer
+        self.text_encoder = pipe.text_encoder
+        self.unet = pipe.unet
+
+        self.scheduler = DDIMScheduler.from_pretrained(
+            model_key, subfolder="scheduler", torch_dtype=self.precision_t
+        )
+
+        del pipe
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
-        self.min_step = int(self.num_train_timesteps * 0.02)
-        self.max_step = int(self.num_train_timesteps * 0.98)
-        self.alphas = self.scheduler.alphas_cumprod  # for convenience
+        self.min_step = int(self.num_train_timesteps * t_range[0])
+        self.max_step = int(self.num_train_timesteps * t_range[1])
+        self.alphas = self.scheduler.alphas_cumprod.to(self.device)  # for convenience
 
         print(f"[INFO] loaded stable diffusion!")
 
-        if concept_name:
-            self.load_concept(concept_name)
+    @torch.no_grad()
+    def compute_text_emb(self, prompt, negative_prompt=""):
+        # prompt: [str]
 
-    def compute_text_emb(self, prompt, negative_prompt="", direction=""):
-        if direction:
-            prompt = f"{prompt}, {direction} view."
-
-        # prompt, negative_prompt: [str]
-        prompt, negative_prompt, direction = [prompt], [negative_prompt], [direction]
-
-        # Tokenize text and get embeddings
-        text_input = self.tokenizer(
+        text_intput = self.tokenizer(
             prompt,
             padding="max_length",
             max_length=self.tokenizer.model_max_length,
-            truncation=True,
             return_tensors="pt",
         )
-
-        with torch.no_grad():
-            text_emb = self.text_encoder(
-                text_input.input_ids.to(self.text_encoder.device)
-            )[0]
+        text_emb = self.text_encoder(text_intput.input_ids.to(self.device))[0]
 
         # Do the same for unconditional embeddings
         uncond_input = self.tokenizer(
@@ -101,37 +119,22 @@ class StableDiffusion(nn.Module):
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
         )
-
-        with torch.no_grad():
-            uncond_emb = self.text_encoder(
-                uncond_input.input_ids.to(self.text_encoder.device)
-            )[0]
+        uncond_emb = self.text_encoder(
+            uncond_input.input_ids.to(self.text_encoder.device)
+        )[0]
 
         # Cat for final embeddings
         text_emb = torch.cat([uncond_emb, text_emb])
         return text_emb
 
-    def encode_rgb(self, rgb):
-        # rgb: [B, 3, H, W]
-        rgb = 2 * rgb - 1
-
-        posterior = self.vae.encode(rgb).latent_dist
-        latents = posterior.sample() * 0.18215
-
-        return latents
-
-    def decode_latents(self, latents):
-
-        latents = 1 / 0.18215 * latents
-
-        with torch.no_grad():
-            rgb = self.vae.decode(latents).sample
-
-        rgb = (rgb / 2 + 0.5).clamp(0, 1)
-
-        return rgb
-
-    def sds(self, text_emb, rgb, guidance_scale=100):
+    def sds(
+        self,
+        text_emb,
+        rgb,
+        guidance_scale=100,
+        as_latent=False,
+        grad_scale=1,
+    ):
         """Score distillation sampling"""
 
         if len(rgb.shape) == 2:
@@ -141,19 +144,21 @@ class StableDiffusion(nn.Module):
         else:
             rgb = rearrange(rgb, "h w c -> 1 c h w")
 
-        rgb = F.interpolate(rgb, (512, 512), mode="bilinear", align_corners=False)
+        if as_latent:
+            latents = (
+                F.interpolate(rgb, (64, 64), mode="bilinear", align_corners=False) * 2
+                - 1
+            )
+        else:
+            # interp to 512x512 to be fed into vae.
+            rgb = F.interpolate(rgb, (512, 512), mode="bilinear", align_corners=False)
+            # encode image into latents with vae, requires grad!
+            latents = self.encode_imgs(rgb)
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
         t = torch.randint(
-            self.min_step,
-            self.max_step + 1,
-            [1],
-            dtype=torch.long,
-            device=self.unet.device,
+            self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
         )
-
-        # encode image into latents with vae, requires grad!
-        latents = self.encode_rgb(rgb)
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
@@ -162,28 +167,33 @@ class StableDiffusion(nn.Module):
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
-
             noise_pred = self.unet(
                 latent_model_input, t, encoder_hidden_states=text_emb
             ).sample
 
         # perform guidance (high scale from paper!)
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_text + guidance_scale * (
-            noise_pred_text - noise_pred_uncond
-        )
+        noise_pred_uncond, noise_pred_pos = noise_pred.chunk(2)
 
-        if self.alphas.device is not self.unet.device:
-            self.alphas = self.alphas.to(self.unet.device)
+        noise_pred = noise_pred_uncond + guidance_scale * (
+            noise_pred_pos - noise_pred_uncond
+        )
 
         # w(t), sigma_t^2
         w = 1 - self.alphas[t]
-        grad = w * (noise_pred - noise)
-
-        # clip grad for stable training?
+        grad = grad_scale * w * (noise_pred - noise)
         grad = torch.nan_to_num(grad)
 
         # since we omitted an item in grad, we need to use the custom function to specify the gradient
         loss = SpecifyGradient.apply(latents, grad)
 
         return loss
+
+    def encode_imgs(self, imgs):
+        # imgs: [B, 3, H, W]
+
+        imgs = 2 * imgs - 1
+
+        posterior = self.vae.encode(imgs).latent_dist
+        latents = posterior.sample() * self.vae.config.scaling_factor
+
+        return latents

@@ -1,3 +1,7 @@
+"""
+Copyright (c) 2022 Ruilong Li, UC Berkeley.
+"""
+
 import collections
 
 import numpy as np
@@ -49,6 +53,8 @@ def rand_poses(
     uniform_sphere_rate=0.5,
 ):
     """generate random poses from an orbit camera
+    Original code: https://github.com/ashawkey/stable-dreamfusion
+
     Args:
         size: batch size of generated poses.
         device: where to allocate the output.
@@ -149,7 +155,6 @@ def circle_poses(
     angle_overhead=30,
     angle_front=60,
 ):
-
     theta = np.deg2rad(theta)
     phi = np.deg2rad(phi)
     angle_overhead = np.deg2rad(angle_overhead)

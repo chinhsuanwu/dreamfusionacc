@@ -1,6 +1,6 @@
 # general
-text: "a DSLR photo of a peacock"
-log: "log/peacock"
+text: "a metal sculpture of a lion's head, highly detailed"
+log: "log/lion"
 
 guidance: "stable-diffusion"  # choices: "if", "stable-diffusion"
 sd_version: "2.1"  # only valid when using stable-diffusion

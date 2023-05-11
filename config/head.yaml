@@ -1,6 +1,6 @@
 # general
-text: "a DSLR photo of a peacock"
-log: "log/peacock"
+text: "a highly detailed stone bust of Theodoros Kolokotronis"
+log: "log/head"
 
 guidance: "stable-diffusion"  # choices: "if", "stable-diffusion"
 sd_version: "2.1"  # only valid when using stable-diffusion

@@ -2,13 +2,13 @@
 
 ## Overview
 
-This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/2209.14988) and its variant [Magic3D](https://arxiv.org/abs/2211.10440), where we utilize [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) to handle the neural rendering part.
+This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/2209.14988) and its variant [Magic3D](https://arxiv.org/abs/2211.10440), where we utilize [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) as the neural renderer and [Stable Diffusion](https://huggingface.co/spaces/stabilityai/stable-diffusion)/[DeepFloyd IF](https://github.com/deep-floyd/IF) as the guidance.
 
-![](https://github.com/chinhsuanwu/dreamfusionacc/assets/67839539/4e274e05-c9c8-464e-abfb-29c0049f2833)
+![](https://github.com/chinhsuanwu/dreamfusionacc/assets/67839539/3793259d-b4a1-4c9e-83e9-fc0416eadf4c)
 
 It takes ~30mins to train on a single 3090.
 
-⚠️ Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for higher quality 3D generation, this repo is not optimized but a light-weight re-implementation.
+⚠️ Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for higher quality 3D generation. This repo is not well-optimized, but it is a lightweight implementation that might be a good starting point if you are interested.
 
 
 ## Installation
@@ -37,12 +37,12 @@ To train
 ```bash
 python train.py --config config/peacock.yaml
 ```
-You can find all controllable settings in those *.yaml files.
+You can find all controllable settings in the yaml file.
 After the training is done, run
 ```bash
 python test.py --config config/peacock.yaml
 ```
-to get 360 visualizations.
+to render 360 visualizations.
 
 
 
@@ -67,3 +67,10 @@ to get 360 visualizations.
 ## Acknowledgments
 
 This implementation is heavily based on [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) and [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion).
+
+<a href="https://github.com/KAIR-BAIR/nerfacc">
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://user-images.githubusercontent.com/3310961/199083722-881a2372-62c1-4255-8521-31a95a721851.png" />
+    <img alt="tyro logo" src="https://user-images.githubusercontent.com/3310961/199084143-0d63eb40-3f35-48d2-a9d5-78d1d60b7d66.png" width="250px" />
+</picture>
+</a>

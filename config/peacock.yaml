@@ -1,0 +1,55 @@
+# general
+text: "a DSLR photo of a peacock"
+log: "log/peacock"
+
+guidance: "stable-diffusion"  # choices: "if", "stable-diffusion"
+sd_version: "2.1"  # only valid when using stable-diffusion
+
+# training parameters
+device: "cuda"
+seed: 42
+lr: 1.0e-2
+weight_decay: 0.0
+max_steps: 10000
+log_interval: 1000
+eval_interval: 1000
+save_interval: 1000
+train_dataset_size: 100
+train_h: 256
+train_w: 256
+eval_dataset_size: 5
+eval_h: 256
+eval_w: 256
+eval_chunk_size: 65536
+
+# radiance field
+backbone: "ngp"  # currently only support "ngp"
+grid_resolution: 128
+grid_nlvl: 1
+grid_update_interval: 10
+grid_update_ema_decay: 0.6
+use_normal_net: False
+use_bkgd_net: True
+density_bias_scale: 10
+offset_scale: 0.5
+
+# scene parameters
+aabb: "-2.0,-2.0,-2.0,2.0,2.0,2.0"
+near_plane: 0.1
+far_plane: 1.0e+10
+
+# render parameters
+n_samples: 512  # 1024 in the paper setting, reduce if encounter OOM error
+cone_angle: 0.0
+alpha_thre: 0.0
+
+# regularization
+use_shading: True
+shading_sample_prob: "0.125,0.125,0.75"   # "albedo", "textureless", "lambertian"
+
+use_orient_loss: True
+lambda_orient: 1.0e-2
+use_opacity_loss: False
+lambda_opacity: 1.0e-3
+use_entropy_loss: True
+lambda_entropy: 1.0e-3

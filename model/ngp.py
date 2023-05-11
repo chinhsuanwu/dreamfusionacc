@@ -130,7 +130,7 @@ class NGPradianceField(torch.nn.Module):
                 "per_level_scale": per_level_scale,
                 "interpolation": "Smoothstep",
             },
-            dtype=torch.float32,    # float16 will cause NaN issue
+            dtype=torch.float32,  # float16 will cause NaN issue
         )
         self.mlp_sigma = tcnn.Network(
             n_input_dims=1 + self.geo_feat_dim,
@@ -267,7 +267,7 @@ class NGPradianceField(torch.nn.Module):
                 if self.use_normal_net:
                     normal = self._query_normal(embedding)
                 else:
-                    #  https://github.com/nerfstudio-project/nerfstudio/blob/main/nerfstudio/fields/base_field.py#L87
+                    # https://github.com/nerfstudio-project/nerfstudio/blob/main/nerfstudio/fields/base_field.py#L87
                     normal = -torch.autograd.grad(
                         density_before_activation,
                         positions,

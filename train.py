@@ -132,12 +132,10 @@ if __name__ == "__main__":
 
         if step < config.max_steps * 0.2:
             render_bkgd = torch.ones_like(data["color_bkgd"])
-            shading = "normal"
-            as_latent = True
+            shading = "albedo"
         else:
             render_bkgd = data["color_bkgd"]
             shading = data["shading"] if config.use_shading else "albdeo"
-            as_latent = False
         text_emb = text_embs[direciton]
 
         def occ_eval_fn(x):
@@ -175,19 +173,11 @@ if __name__ == "__main__":
         optimizer.zero_grad()
 
         with torch.cuda.amp.autocast():
-            if config.guidance == "if":
-                loss = guidance.sds(
-                    text_emb,
-                    rgb,
-                    guidance_scale=100,
-                )
-            elif config.guidance == "stable-diffusion":
-                loss = guidance.sds(
-                    text_emb,
-                    rgb if not as_latent else torch.cat((rgb, acc), dim=1),
-                    as_latent=as_latent,
-                    guidance_scale=100,
-                )
+            loss = guidance.sds(
+                text_emb,
+                rgb,
+                guidance_scale=100,
+            )
 
             if config.use_orient_loss and loss_orient is not None:
                 loss += config.lambda_orient * loss_orient

@@ -43,7 +43,7 @@ def get_view_direction(thetas, phis, overhead, front):
 def rand_poses(
     size,
     device,
-    radius_range=[1.5, 2],
+    radius_range=[1.2, 2],
     theta_range=[0, 120],
     phi_range=[0, 360],
     return_dirs=False,

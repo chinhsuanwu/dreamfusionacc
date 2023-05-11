@@ -104,7 +104,7 @@ class DreamFusionLoader(Dataset):
         else:
             phi = (index / self.size) * 360
             pose, direction = circle_poses(
-                radius=1.5, phi=phi, device=self.device, return_dirs=True
+                radius=1.25, phi=phi, device=self.device, return_dirs=True
             )
 
         c2w = pose[0, :3, :].expand(self.num_rays, 3, 4)  # (num_rays, 3, 4)

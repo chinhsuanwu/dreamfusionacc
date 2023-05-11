@@ -73,10 +73,11 @@ if __name__ == "__main__":
     radiance_field.load_state_dict(checkpoint["radiance_field"])
 
     # setup dataset
+    width, height = 512, 512
     test_dataset = DreamFusionLoader(
         size=36,
-        width=512,
-        height=512,
+        width=width,
+        height=height,
         training=False,
         device=config.device,
     )
@@ -109,12 +110,8 @@ if __name__ == "__main__":
             )
 
             if len(rgb.shape) == 2:
-                rgb = rearrange(
-                    rgb, "(h w) c -> h w c", h=config.eval_h, w=config.eval_w
-                )
-                depth = rearrange(
-                    depth, "(h w) 1 -> h w", h=config.eval_h, w=config.eval_w
-                )
+                rgb = rearrange(rgb, "(h w) c -> h w c", h=height, w=width)
+                depth = rearrange(depth, "(h w) 1 -> h w", h=height, w=width)
 
             # save visualizations
             imageio.imwrite(

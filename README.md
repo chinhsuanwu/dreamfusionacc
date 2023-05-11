@@ -2,9 +2,9 @@
 
 ## Overview
 
-This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/2209.14988) and its variant [Magic3D](https://arxiv.org/abs/2211.10440), where we utilize [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) as the neural renderer and [Stable Diffusion](https://huggingface.co/spaces/stabilityai/stable-diffusion)/[DeepFloyd IF](https://github.com/deep-floyd/IF) as the guidance.
+This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/2209.14988) and its variant [Magic3D](https://arxiv.org/abs/2211.10440), where we utilize [Instant-NGP](https://github.com/NVlabs/instant-ngp) as the neural renderer and [Stable Diffusion](https://huggingface.co/spaces/stabilityai/stable-diffusion)/[DeepFloyd IF](https://github.com/deep-floyd/IF) as the guidance.
 
-![](https://github.com/chinhsuanwu/dreamfusionacc/assets/67839539/3793259d-b4a1-4c9e-83e9-fc0416eadf4c)
+![](https://github.com/chinhsuanwu/dreamfusionacc/assets/67839539/b20dc43d-19e5-4dcc-b6bf-d8c9086faa0f)
 
 It takes ~30mins to train on a single 3090.
 
@@ -22,6 +22,7 @@ pip install -r requirements.txt
 
   ## Dependencies
   - torch
+  - tinycudann
   - nerfacc
   - numpy
   - imageio

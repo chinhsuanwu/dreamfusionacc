@@ -12,7 +12,7 @@ from nerfacc.estimators.occ_grid import OccGridEstimator
 from tqdm import tqdm, trange
 
 from dataset.dreamfusion import DreamFusionLoader
-from model.ngp import NGPradianceField
+from renderer.ngp import NGPradianceField
 from utils import render_image_with_occgrid, set_random_seed
 
 

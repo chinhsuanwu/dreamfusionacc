@@ -124,8 +124,6 @@ if __name__ == "__main__":
         radiance_field.train()
 
         i = torch.randint(0, len(train_dataset), (1,)).item()
-        radiance_field.train()
-
         data = train_dataset[i]
         rays = data["rays"]
         direciton = data["direction"]

@@ -8,7 +8,7 @@ This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/
 
 It takes ~30mins to train on a single 3090.
 
-⚠️ Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for higher quality 3D generation. This repo is not well-optimized, but it is a lightweight implementation that might be a good starting point if you are interested.
+⚠️ Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for high quality 3D generation and mesh export. Though this repo has not yet been fully optimized, e.g., the refinement stage is missing, it could still serve as a good starting point for its lightweight and straightforward implementation.
 
 
 ## Installation

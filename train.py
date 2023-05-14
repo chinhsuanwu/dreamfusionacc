@@ -174,7 +174,7 @@ if __name__ == "__main__":
             loss = guidance.sds(
                 text_emb,
                 rgb,
-                guidance_scale=100,
+                guidance_scale=config.guidance_scale,
             )
 
             if config.use_orient_loss and loss_orient is not None:
@@ -220,7 +220,7 @@ if __name__ == "__main__":
             radiance_field.eval()
 
             with torch.no_grad():
-                for j in trange(len(test_dataset), desc="Evaluation"):
+                for j in trange(len(test_dataset), desc="Eval"):
                     data = test_dataset[j]
                     rays = data["rays"]
                     render_bkgd = data["color_bkgd"]
@@ -243,13 +243,12 @@ if __name__ == "__main__":
                         chunk_size=config.eval_chunk_size,
                     )
 
-                    if len(rgb.shape) == 2:
-                        rgb = rearrange(
-                            rgb, "(h w) c -> h w c", h=config.eval_h, w=config.eval_w
-                        )
-                        depth = rearrange(
-                            depth, "(h w) 1 -> h w", h=config.eval_h, w=config.eval_w
-                        )
+                    rgb = rearrange(
+                        rgb, "(h w) c -> h w c", h=config.eval_h, w=config.eval_w
+                    )
+                    depth = rearrange(
+                        depth, "(h w) 1 -> h w", h=config.eval_h, w=config.eval_w
+                    )
 
                     # save visualizations
                     imageio.imwrite(

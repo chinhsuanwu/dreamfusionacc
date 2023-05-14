@@ -137,12 +137,9 @@ class StableDiffusion(nn.Module):
     ):
         """Score distillation sampling"""
 
-        if len(rgb.shape) == 2:
-            num_rays, _ = rgb.shape
-            h = w = int(num_rays ** (1 / 2))
-            rgb = rearrange(rgb, "(h w) c -> 1 c h w", h=h, w=w)
-        else:
-            rgb = rearrange(rgb, "h w c -> 1 c h w")
+        num_rays, _ = rgb.shape
+        h = w = int(num_rays ** (1 / 2))
+        rgb = rearrange(rgb, "(h w) c -> 1 c h w", h=h, w=w)
 
         if as_latent:
             latents = (
@@ -172,10 +169,10 @@ class StableDiffusion(nn.Module):
             ).sample
 
         # perform guidance (high scale from paper!)
-        noise_pred_uncond, noise_pred_pos = noise_pred.chunk(2)
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
 
         noise_pred = noise_pred_uncond + guidance_scale * (
-            noise_pred_pos - noise_pred_uncond
+            noise_pred_text - noise_pred_uncond
         )
 
         # w(t), sigma_t^2

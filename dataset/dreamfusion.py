@@ -7,10 +7,10 @@ from .utils import Rays, rand_poses, circle_poses
 
 
 class DreamFusionLoader(Dataset):
-    """Generates rays and direction texts in novel views.
+    """Generates rays and direction texts in random views.
 
-    data["novel"]
-        - rays: [num_rays, 3] or [h, w, 3]
+    Returns:
+        - rays: [num_rays, 3]
         - direction: str
         - color_bkgd: [3,]
         - shading: str

@@ -3,6 +3,7 @@ Original code: https://github.com/ashawkey/stable-dreamfusion
 """
 
 from diffusers import IFPipeline
+from diffusers.utils.import_utils import is_xformers_available
 from einops import rearrange
 from transformers import logging
 
@@ -77,42 +78,16 @@ class IF(nn.Module):
     def compute_text_emb(self, prompt, negative_prompt=""):
         # prompt: [str]
 
-        # TODO: should I add the preprocessing at https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/deepfloyd_if/pipeline_if.py#LL486C10-L486C28
-        prompt = self.pipe._text_preprocessing(prompt, clean_caption=False)
-        text_input = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=77,
-            truncation=True,
-            add_special_tokens=True,
-            return_tensors="pt",
+        text_emb, uncond_emb = self.pipe.encode_prompt(
+            prompt=prompt, negative_prompt=negative_prompt, device=self.device
         )
-        text_emb = self.text_encoder(text_input.input_ids.to(self.device))[0]
-
-        negative_prompt = self.pipe._text_preprocessing(
-            negative_prompt, clean_caption=False
-        )
-        uncond_input = self.tokenizer(
-            negative_prompt,
-            padding="max_length",
-            max_length=77,
-            truncation=True,
-            add_special_tokens=True,
-            return_tensors="pt",
-        )
-        uncond_emb = self.text_encoder(uncond_input.input_ids.to(self.device))[0]
-
-        # Cat for final embeddings
         text_emb = torch.cat([uncond_emb, text_emb])
         return text_emb
 
-    def sds(self, text_emb, rgb, guidance_scale=100, grad_scale=1):
-        if len(rgb.shape) == 2:
-            num_rays, _ = rgb.shape
-            h = w = int(num_rays ** (1 / 2))
-            rgb = rearrange(rgb, "(h w) c -> 1 c h w", h=h, w=w)
-        else:
-            rgb = rearrange(rgb, "h w c -> 1 c h w")
+    def sds(self, text_emb, rgb, guidance_scale=20, grad_scale=1):
+        num_rays, _ = rgb.shape
+        h = w = int(num_rays ** (1 / 2))
+        rgb = rearrange(rgb, "(h w) c -> 1 c h w", h=h, w=w)
 
         # [0, 1] to [-1, 1] and make sure shape is [64, 64]
         images = (
@@ -144,9 +119,6 @@ class IF(nn.Module):
             noise_pred = noise_pred_uncond + guidance_scale * (
                 noise_pred_text - noise_pred_uncond
             )
-
-            # TODO: how to use the variance here?
-            # noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
 
         # w(t), sigma_t^2
         w = 1 - self.alphas[t]

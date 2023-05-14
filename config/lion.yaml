@@ -2,8 +2,10 @@
 text: "a metal sculpture of a lion's head, highly detailed"
 log: "log/lion"
 
+# guidance
 guidance: "stable-diffusion"  # choices: "if", "stable-diffusion"
-sd_version: "2.1"  # only valid when using stable-diffusion
+sd_version: "2.1"  # choices: "2.1", "2.0", "1.5", only valid when using stable-diffusion
+guidance_scale: 100
 
 # training parameters
 device: "cuda"

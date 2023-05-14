@@ -6,9 +6,9 @@ This is a minimal PyTorch implementation of [DreamFusion](https://arxiv.org/abs/
 
 ![](https://github.com/chinhsuanwu/dreamfusionacc/assets/67839539/b20dc43d-19e5-4dcc-b6bf-d8c9086faa0f)
 
-It takes ~30mins to train on a single 3090.
+It takes ~30min to train with [Stable Diffusion](https://huggingface.co/spaces/stabilityai/stable-diffusion) and ~40min with [DeepFloyd IF](https://github.com/deep-floyd/IF) on a single 3090.
 
-⚠️ Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for high quality 3D generation and mesh export. Though this repo has not yet been fully optimized, e.g., the refinement stage is missing, it could still serve as a good starting point for its lightweight and straightforward implementation.
+⚠️ This repo has not yet been well-optimized, e.g., memory usage and lack of refinement stage. However, it is still a good reference for its easy-to-follow and lightweight implementation. Please use [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion) or [threestudio](https://github.com/threestudio-project/threestudio) for better quality 3D generation and mesh export.
 
 
 ## Installation
@@ -30,7 +30,7 @@ pip install -r requirements.txt
   - diffusers
   - trainsformers
 
-  [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) provides pre-built wheels covering major combinations of Pytorch + CUDA. This repo is built upon torch 1.13.0 + cu117.
+  You may install the pre-built wheels for [NerfAcc](https://github.com/KAIR-BAIR/nerfacc). Please check out [here](https://github.com/KAIR-BAIR/nerfacc#installation). This repo is built upon torch 1.13.0 + cu117.
 </details>
 
 ## Howtos
@@ -43,7 +43,7 @@ After the training is done, run
 ```bash
 python test.py --config config/peacock.yaml
 ```
-to render 360 visualizations.
+to render 360˚ visualizations.
 
 
 
@@ -65,9 +65,9 @@ to render 360 visualizations.
 }
 ```
 
-## Acknowledgments
+## Credits
 
-This implementation is heavily based on [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) and [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion).
+This implementation is heavily based on [NerfAcc](https://github.com/KAIR-BAIR/nerfacc) and [stable-dreamfusion](https://github.com/ashawkey/stable-dreamfusion). Kudos to the authors for their amazing work!
 
 <a href="https://github.com/KAIR-BAIR/nerfacc">
 <picture>

@@ -109,9 +109,8 @@ if __name__ == "__main__":
                 chunk_size=config.eval_chunk_size,
             )
 
-            if len(rgb.shape) == 2:
-                rgb = rearrange(rgb, "(h w) c -> h w c", h=height, w=width)
-                depth = rearrange(depth, "(h w) 1 -> h w", h=height, w=width)
+            rgb = rearrange(rgb, "(h w) c -> h w c", h=height, w=width)
+            depth = rearrange(depth, "(h w) 1 -> h w", h=height, w=width)
 
             # save visualizations
             imageio.imwrite(

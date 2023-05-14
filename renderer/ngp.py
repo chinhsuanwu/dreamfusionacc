@@ -277,6 +277,7 @@ class NGPradianceField(torch.nn.Module):
                     normal = safe_normalize(normal).nan_to_num()
 
             ambient_ratio = 0.1 + 0.9 * np.random.rand()
+            light_direction = light_direction.to(normal.dtype)
             lambertian = ambient_ratio + (1 - ambient_ratio) * (
                 normal @ light_direction / (light_direction**2).sum() ** (1 / 2)
             ).clamp(min=0).unsqueeze(-1)
